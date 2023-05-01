@@ -56,20 +56,18 @@ defmodule Filters do
 
     mid =
       ignore(optional_whitespace)
-      |> concat(
-        choice([
-          string("==") |> replace(:is),
-          string("!=") |> replace(:is_not),
-          string("~") |> replace(:contains),
-          string("!~") |> replace(:does_not_contain)
-        ])
-      )
+      |> choice([
+        string("==") |> replace(:is),
+        string("!=") |> replace(:is_not),
+        string("~") |> replace(:contains),
+        string("!~") |> replace(:does_not_contain)
+      ])
       |> ignore(optional_whitespace)
       |> label("operator")
 
     wildcard =
       ascii_string([@wildcard_char], min: 1, max: 2)
-      |> concat(optional(whitespace))
+      |> optional(whitespace)
       |> reduce({Enum, :join, [""]})
       |> tag(:wildcard)
 
@@ -77,8 +75,7 @@ defmodule Filters do
       times(
         utf8_string(@word, min: 1)
         |> optional(whitespace)
-        |> optional(string("\\|") |> replace("|"))
-        |> optional(whitespace)
+        |> optional(string("\\|") |> replace("|") |> optional(whitespace))
         |> reduce({Enum, :join, [""]}),
         min: 1
       )
@@ -93,14 +90,12 @@ defmodule Filters do
 
     alternative =
       token
-      |> concat(
-        times(
-          concat(
-            ignore(ascii_char([@alt_separator_char])),
-            token
-          ),
-          min: 1
-        )
+      |> times(
+        concat(
+          ignore(ascii_char([@alt_separator_char])),
+          token
+        ),
+        min: 1
       )
       |> wrap()
 

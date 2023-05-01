@@ -241,6 +241,14 @@ defmodule FiltersTest do
               ]} ==
                parse("utm_campaign==Foo Bar**|Hello Cruel* World")
     end
+
+    test "three alternatives with trailing space" do
+      assert {:ok,
+              [
+                {"visit:utm_campaign", :is, [{:literal, "A"}, {:literal, "B"}, {:literal, "C"}]}
+              ]} ==
+               parse("utm_campaign==A|B|C")
+    end
   end
 
   describe "parse errors" do
