@@ -52,6 +52,11 @@ defmodule FiltersTest do
       assert {:ok, [{"visit:utm_campaign", :is, {:literal, "foo"}}]} ==
                parse("utm_campaign==foo;unknown==hello")
     end
+
+    test "utf-8 chars are supported" do
+      assert {:ok, [{"visit:utm_campaign", :is, {:literal, "😀超"}}]} ==
+               parse("utm_campaign==😀超")
+    end
   end
 
   describe "prefixes" do
