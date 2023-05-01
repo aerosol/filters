@@ -1,6 +1,9 @@
 defmodule Filters do
   defmodule Parser do
     import NimbleParsec
+    @debug? false
+
+    def debug?, do: @debug?
 
     @whitespace_chars [?\s, ?\t, ?\n]
 
@@ -13,14 +16,41 @@ defmodule Filters do
     @not_wildcard not: @wildcard_char
     @not_alt_separator not: @alt_separator_char
 
-    @word @not_prop_separator ++ @not_wildcard ++ @not_alt_separator ++ @not_space
+    @word @not_prop_separator ++ @not_wildcard ++ @not_space ++ @not_alt_separator ++ [not: ?\\]
 
     whitespace = ascii_string(@whitespace_chars, min: 1)
     optional_whitespace = optional(whitespace)
 
     left =
       ignore(optional_whitespace)
-      |> concat(ascii_string([?a..?z, ?:, ?_], min: 3) |> label("key name"))
+      |> choice([
+        string("goal") |> replace("event:goal"),
+        string("page") |> replace("event:page"),
+        string("name") |> replace("event:name"),
+        string("source") |> replace("visit:source"),
+        string("country") |> replace("visit:country"),
+        string("referrer") |> replace("visit:referrer"),
+        string("utm_medium") |> replace("visit:utm_medium"),
+        string("utm_source") |> replace("visit:utm_source"),
+        string("utm_term") |> replace("visit:utm_term"),
+        string("utm_content") |> replace("visit:utm_content"),
+        string("utm_campaign") |> replace("visit:utm_campaign"),
+        string("screen") |> replace("visit:screen"),
+        string("browser_version") |> replace("visit:browser_version"),
+        string("browser") |> replace("visit:browser"),
+        string("os_version") |> replace("visit:os_version"),
+        string("os") |> replace("visit:os"),
+        string("device") |> replace("visit:device"),
+        string("city") |> replace("visit:city"),
+        string("region") |> replace("visit:region"),
+        string("entry_page") |> replace("visit:entry_page"),
+        string("exit_page") |> replace("visit:exit_page"),
+        string("props:")
+        |> replace("event:props:")
+        |> ascii_string([?a..?z, ?A..?Z, ?0..9, ?_], min: 1)
+        |> reduce({Enum, :join, [""]})
+      ])
+      |> label("key name")
       |> ignore(optional_whitespace)
       |> label("key")
 
@@ -37,25 +67,27 @@ defmodule Filters do
       |> ignore(optional_whitespace)
       |> label("operator")
 
-    wildcard = ascii_string([@wildcard_char], min: 1, max: 2) |> tag(:wildcard)
-    word_no_space = utf8_string(@word, min: 1)
+    wildcard =
+      ascii_string([@wildcard_char], min: 1, max: 2)
+      |> concat(optional(whitespace))
+      |> reduce({Enum, :join, [""]})
+      |> tag(:wildcard)
 
-    words_with_spaces_inside =
+    word =
       times(
-        word_no_space
-        |> concat(
-          times(
-            whitespace
-            |> concat(word_no_space),
-            min: 1
-          )
-        ),
+        utf8_string(@word, min: 1)
+        |> optional(whitespace)
+        |> optional(string("\\|") |> replace("|"))
+        |> optional(whitespace)
+        |> reduce({Enum, :join, [""]}),
         min: 1
       )
 
+    valid_token = choice([word, wildcard])
+
     token =
       ignore(optional_whitespace)
-      |> times(choice([words_with_spaces_inside, word_no_space, wildcard]), min: 1)
+      |> times(valid_token, min: 1)
       |> ignore(optional_whitespace)
       |> reduce({:mark_wildcards, []})
 
@@ -64,8 +96,7 @@ defmodule Filters do
       |> concat(
         times(
           concat(
-            ascii_char([@alt_separator_char])
-            |> ignore(),
+            ignore(ascii_char([@alt_separator_char])),
             token
           ),
           min: 1
@@ -97,9 +128,27 @@ defmodule Filters do
       |> reduce({:reducer, []})
 
     defp reducer(args) do
-      IO.inspect(args, label: :reducer)
+      if @debug?, do: IO.inspect(args, label: :reducer)
 
       Enum.reduce(args, [], fn
+        ["event:goal" = goal_key, operator, mixed_goals], acc when is_list(mixed_goals) ->
+          mapped =
+            Enum.map(mixed_goals, fn
+              {type, "Visit " <> expression} ->
+                {"event:page", operator, alter_expression(goal_key, operator, {type, expression})}
+
+              {type, expression} ->
+                {goal_key, operator, alter_expression(goal_key, operator, {type, expression})}
+            end)
+
+          mapped ++ acc
+
+        ["event:goal" = goal_key, operator, {type, "Visit " <> expression}], acc ->
+          [
+            {"event:page", operator, alter_expression(goal_key, operator, {type, expression})}
+            | acc
+          ]
+
         [key, operator, expression], acc when is_list(expression) ->
           [{key, operator, alter_expression(key, operator, expression)} | acc]
 
@@ -144,12 +193,12 @@ defmodule Filters do
     defparsec(:filter, filter, debug: false)
 
     def parse_filters(input) do
-      case filter(input) |> IO.inspect(label: true) do
+      case filter(input) do
         {:ok, [filters], "", _, _, _} ->
           {:ok, filters}
 
-        {:ok, _, failed_to_parse, _, _, _} ->
-          {:error, failed_to_parse}
+        {:ok, [parsed], _failed_to_parse, _, _, _} ->
+          {:ok, parsed}
 
         {:error, error, _, _, _, _} ->
           {:error, error}
