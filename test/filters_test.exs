@@ -160,11 +160,6 @@ defmodule FiltersTest do
                parse("utm_campaign!~**Foo Bar")
     end
 
-    test "reject trailing unknown properties" do
-      assert {:ok, [{"visit:utm_campaign", :is, {:literal, "foo"}}]} ==
-               parse("utm_campaign==foo;unknown==hello")
-    end
-
     test "utf-8 chars are supported" do
       assert {:ok, [{"visit:utm_campaign", :is, {:literal, "😀超"}}]} ==
                parse("utm_campaign==😀超")
@@ -189,17 +184,12 @@ defmodule FiltersTest do
       assert {:ok, [{"visit:country", :is, {:literal, "EE"}}]} == parse("country==EE")
     end
 
-    test "country must be 2 characters long" do
-      assert {:ok, [{"visit:country", :is, [{:literal, "EE"}, {:literal, "XX"}]}]} ==
-               parse("country==EE|XX|XYZ")
-    end
-
     test "source is turned into visit:source" do
       assert {:ok, [{"visit:source", :is, {:literal, "foo.com"}}]} == parse("source==foo.com")
     end
 
     test "referrer is turned into visit:referer" do
-      assert {:ok, [{"visit:referrer", :is, {:literal, "cnn.com"}}]} == parse("referrer==cnn.com")
+      assert {:ok, [{"visit:referrer", :is, {:literal, "foo.com"}}]} == parse("referrer==foo.com")
     end
 
     test "utm_medium is turned into visit:utm_medium" do
@@ -307,10 +297,6 @@ defmodule FiltersTest do
                 {"visit:utm_campaign", :is, {:literal, "foo   |   bar"}}
               ]} = parse("utm_campaign==foo   \\|   bar")
     end
-
-    test "country validation and following filter" do
-      assert {:error, "did not expect filter"} = parse("country==XXX;utm_source=foo.com")
-    end
   end
 
   describe "muiltiple values" do
@@ -380,28 +366,59 @@ defmodule FiltersTest do
 
   describe "parse errors" do
     test "key missing" do
-      assert {:error, "expected filter"} = parse("")
-      assert {:error, "expected filter"} = parse("xx")
-      assert {:error, "expected filter"} = parse(" xx")
-      assert {:error, "expected filter"} = parse(" xx ")
-      assert {:error, "expected filter"} = parse("xx ")
+      assert {:error, err} = parse("")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("xx")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse(" xx")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse(" xx ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("xx ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
     end
 
     test "operator missing" do
-      assert {:error, "expected filter"} = parse("country")
-      assert {:error, "expected filter"} = parse("country  ")
-      assert {:error, "expected filter"} = parse(" country  ")
-      assert {:error, "expected filter"} = parse("    country")
-      assert {:error, "expected filter"} = parse("country=")
-      assert {:error, "expected filter"} = parse("country!")
+      assert {:error, err} = parse("country")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("country  ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse(" country  ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("    country")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("country=")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("country!")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
     end
 
     test "expression missing" do
-      assert {:error, "expected filter"} = parse("country==")
-      assert {:error, "expected filter"} = parse(" country==")
-      assert {:error, "expected filter"} = parse("country== ")
-      assert {:error, "expected filter"} = parse("country == ")
-      assert {:error, "expected filter"} = parse(" country == ")
+      assert {:error, err} = parse("country==")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse(" country==")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("country== ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse("country == ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+      assert {:error, err} = parse(" country == ")
+      assert err =~ "Error: expected filter. Stopped parsing at character"
+    end
+
+    test "report an error on unknown properties" do
+      assert {:error, "Error - failed to parse: unknown==hello. Stopped parsing at character 18"} =
+               parse("utm_campaign==foo;unknown==hello")
+    end
+
+    test "country must be 2 characters long" do
+      assert {:error, "Error - failed to parse: |XYZ. Stopped parsing at character 14"} =
+               parse("country==EE|XX|XYZ")
+    end
+
+    test "country validation and following filter" do
+      assert {:error, "Error: did not expect filter" <> _} =
+               parse("country==XXX;utm_source==foo.com")
     end
   end
 
@@ -413,16 +430,13 @@ defmodule FiltersTest do
 
       case result do
         {:ok, _result} ->
-          IO.ANSI.blue() |> IO.puts()
+          IO.puts(IO.ANSI.blue())
 
         _ ->
-          IO.ANSI.red() |> IO.puts()
+          IO.puts(IO.ANSI.red())
       end
 
-      IO.puts(inspect(result))
-
-      IO.ANSI.reset()
-      |> IO.puts()
+      IO.puts(inspect(result) <> IO.ANSI.reset())
     end
 
     result

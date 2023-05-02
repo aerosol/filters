@@ -5,9 +5,8 @@ defmodule Filters do
 
     def debug?, do: @debug?
 
-    @whitespace_chars [?\s, ?\t, ?\n]
-
     @space ?\s
+    @whitespace_chars [@space, ?\t, ?\n]
     @not_space not: @space
     @wildcard_char ?*
     @filter_separator_char ?;
@@ -19,7 +18,6 @@ defmodule Filters do
     @word @not_prop_separator ++ @not_wildcard ++ @not_space ++ @not_alt_separator ++ [not: ?\\]
 
     whitespace = ascii_string(@whitespace_chars, min: 1)
-    optional_whitespace = optional(whitespace)
 
     ignore_alt_separator =
       ignore(
@@ -29,8 +27,7 @@ defmodule Filters do
       )
 
     wildcard_key =
-      ignore(optional_whitespace)
-      |> choice([
+      choice([
         string("page") |> replace("event:page"),
         string("entry_page") |> replace("visit:entry_page"),
         string("exit_page") |> replace("visit:exit_page"),
@@ -41,11 +38,9 @@ defmodule Filters do
         string("utm_content") |> replace("visit:utm_content"),
         string("utm_campaign") |> replace("visit:utm_campaign")
       ])
-      |> ignore(optional_whitespace)
 
     literal_key =
-      ignore(optional_whitespace)
-      |> choice([
+      choice([
         string("name") |> replace("event:name"),
         string("source") |> replace("visit:source"),
         string("referrer") |> replace("visit:referrer"),
@@ -62,32 +57,25 @@ defmodule Filters do
         |> ascii_string([?a..?z, ?A..?Z, ?0..9, ?_], min: 1)
         |> reduce({Enum, :join, [""]})
       ])
-      |> ignore(optional_whitespace)
 
-    country_key =
-      ignore(optional_whitespace)
-      |> string("country")
-      |> replace("visit:country")
-      |> ignore(optional_whitespace)
+    country_key = string("country") |> replace("visit:country")
 
     operator =
-      ignore(optional_whitespace)
-      |> choice([
+      choice([
         string("==") |> replace(:is),
         string("!=") |> replace(:is_not),
         string("~") |> replace(:contains),
         string("!~") |> replace(:does_not_contain)
       ])
-      |> ignore(optional_whitespace)
 
     wildcard = ascii_string([?*], min: 1, max: 2)
 
     words =
-      optional_whitespace
+      optional(whitespace)
       |> optional(wildcard)
       |> utf8_char(@word)
       |> optional(
-        optional_whitespace
+        optional(whitespace)
         |> optional(string("\\|") |> replace("|"))
         |> optional(whitespace)
         |> utf8_char(@word)
@@ -95,34 +83,18 @@ defmodule Filters do
       |> optional(wildcard)
 
     token =
-      ignore(optional_whitespace)
-      |> times(words,
-        min: 1
-      )
-      |> label("token")
+      ignore(optional(whitespace))
+      |> times(words, min: 1)
 
-    literal_token =
-      token
-      |> reduce({:unwrap, [[tag_wildcards?: false]]})
+    literal_token = token |> reduce({:unwrap, [[tag_wildcards?: false]]})
 
-    wildcard_token =
-      token
-      |> reduce({:unwrap, [[tag_wildcards?: true]]})
+    wildcard_token = token |> reduce({:unwrap, [[tag_wildcards?: true]]})
 
     country_token =
       ascii_string([?A..?Z], 2) |> lookahead_not(utf8_char(@word)) |> unwrap_and_tag(:literal)
 
-    defp unwrap(args, opts) do
-      if opts[:tag_wildcards?] and ("**" in args or "*" in args) do
-        {:wildcard, List.to_string(args)}
-      else
-        {:literal, List.to_string(args)}
-      end
-    end
-
     literal_expression =
-      ignore(optional_whitespace)
-      |> times(
+      times(
         choice([
           # list of tokens
           literal_token
@@ -137,11 +109,10 @@ defmodule Filters do
         ]),
         min: 1
       )
-      |> ignore(optional_whitespace)
+      |> ignore(optional(whitespace))
 
     wildcard_expression =
-      ignore(optional_whitespace)
-      |> times(
+      times(
         choice([
           # list of tokens
           wildcard_token
@@ -156,11 +127,10 @@ defmodule Filters do
         ]),
         min: 1
       )
-      |> ignore(optional_whitespace)
+      |> ignore(optional(whitespace))
 
     country_expression =
-      ignore(optional_whitespace)
-      |> times(
+      times(
         choice([
           # list of tokens
           country_token
@@ -175,7 +145,7 @@ defmodule Filters do
         ]),
         min: 1
       )
-      |> ignore(optional_whitespace)
+      |> ignore(optional(whitespace))
 
     literal_filter =
       literal_key
@@ -192,9 +162,7 @@ defmodule Filters do
       |> concat(operator)
       |> concat(country_expression)
 
-    filter =
-      choice([literal_filter, wildcard_filter, country_filter])
-      |> label("filter")
+    filter = choice([literal_filter, wildcard_filter, country_filter]) |> label("filter")
 
     filters =
       times(
@@ -204,6 +172,14 @@ defmodule Filters do
         min: 1
       )
       |> reduce({:reducer, []})
+
+    defp unwrap(args, opts) do
+      if opts[:tag_wildcards?] and ("**" in args or "*" in args) do
+        {:wildcard, List.to_string(args)}
+      else
+        {:literal, List.to_string(args)}
+      end
+    end
 
     defp reducer(args) do
       if @debug?, do: IO.inspect(args, label: :reducer)
@@ -258,20 +234,21 @@ defmodule Filters do
       {:wildcard, "**" <> String.replace(wildcard, "*", "") <> "**"}
     end
 
-    defparsec(:filters, filters, debug: false)
-    defparsec(:literal_expression, literal_expression, debug: false)
-    defparsec(:wildcard_expression, wildcard_expression, debug: false)
+    defparsec(:filters, filters, debug: @debug?)
+    defparsec(:literal_expression, literal_expression, debug: @debug?)
+    defparsec(:wildcard_expression, wildcard_expression, debug: @debug?)
 
     def parse(input, parse_with \\ :filters) do
       case apply(__MODULE__, parse_with, [input]) do
         {:ok, [parsed], "", _, _, _} ->
           {:ok, parsed}
 
-        {:ok, [parsed], _failed_to_parse, _, _, _} ->
-          {:ok, parsed}
+        {:ok, [_partially_parsed], failed_to_parse, _, _, n} ->
+          {:error,
+           "Error - failed to parse: #{failed_to_parse}. Stopped parsing at character #{n}"}
 
-        {:error, error, _, _, _, _} ->
-          {:error, error}
+        {:error, error, _, _, _, n} ->
+          {:error, "Error: #{error}. Stopped parsing at character #{n}"}
       end
     end
   end
