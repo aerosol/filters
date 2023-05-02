@@ -21,6 +21,13 @@ defmodule Filters do
     whitespace = ascii_string(@whitespace_chars, min: 1)
     optional_whitespace = optional(whitespace)
 
+    ignore_alt_separator =
+      ignore(
+        optional(whitespace)
+        |> ascii_char([@alt_separator_char])
+        |> optional(whitespace)
+      )
+
     wildcard_key =
       ignore(optional_whitespace)
       |> choice([
@@ -120,11 +127,7 @@ defmodule Filters do
           # list of tokens
           literal_token
           |> times(
-            ignore(
-              optional(whitespace)
-              |> ascii_char([@alt_separator_char])
-              |> optional(whitespace)
-            )
+            ignore_alt_separator
             |> concat(literal_token),
             min: 1
           )
@@ -143,11 +146,7 @@ defmodule Filters do
           # list of tokens
           wildcard_token
           |> times(
-            ignore(
-              optional(whitespace)
-              |> ascii_char([@alt_separator_char])
-              |> optional(whitespace)
-            )
+            ignore_alt_separator
             |> concat(wildcard_token),
             min: 1
           )
@@ -166,11 +165,7 @@ defmodule Filters do
           # list of tokens
           country_token
           |> times(
-            ignore(
-              optional(whitespace)
-              |> ascii_char([@alt_separator_char])
-              |> optional(whitespace)
-            )
+            ignore_alt_separator
             |> concat(country_token),
             min: 1
           )
