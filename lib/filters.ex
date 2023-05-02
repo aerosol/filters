@@ -21,20 +21,28 @@ defmodule Filters do
     whitespace = ascii_string(@whitespace_chars, min: 1)
     optional_whitespace = optional(whitespace)
 
-    left =
+    wildcard_key =
       ignore(optional_whitespace)
       |> choice([
-        string("goal") |> replace("event:goal"),
         string("page") |> replace("event:page"),
-        string("name") |> replace("event:name"),
-        string("source") |> replace("visit:source"),
-        string("country") |> replace("visit:country"),
-        string("referrer") |> replace("visit:referrer"),
+        string("entry_page") |> replace("visit:entry_page"),
+        string("exit_page") |> replace("visit:exit_page"),
+        string("goal") |> replace("event:goal"),
         string("utm_medium") |> replace("visit:utm_medium"),
         string("utm_source") |> replace("visit:utm_source"),
         string("utm_term") |> replace("visit:utm_term"),
         string("utm_content") |> replace("visit:utm_content"),
-        string("utm_campaign") |> replace("visit:utm_campaign"),
+        string("utm_campaign") |> replace("visit:utm_campaign")
+      ])
+      |> ignore(optional_whitespace)
+
+    literal_key =
+      ignore(optional_whitespace)
+      |> choice([
+        string("name") |> replace("event:name"),
+        string("source") |> replace("visit:source"),
+        string("country") |> replace("visit:country"),
+        string("referrer") |> replace("visit:referrer"),
         string("screen") |> replace("visit:screen"),
         string("browser_version") |> replace("visit:browser_version"),
         string("browser") |> replace("visit:browser"),
@@ -43,18 +51,14 @@ defmodule Filters do
         string("device") |> replace("visit:device"),
         string("city") |> replace("visit:city"),
         string("region") |> replace("visit:region"),
-        string("entry_page") |> replace("visit:entry_page"),
-        string("exit_page") |> replace("visit:exit_page"),
         string("props:")
         |> replace("event:props:")
         |> ascii_string([?a..?z, ?A..?Z, ?0..9, ?_], min: 1)
         |> reduce({Enum, :join, [""]})
       ])
-      |> label("key name")
       |> ignore(optional_whitespace)
-      |> label("key")
 
-    mid =
+    operator =
       ignore(optional_whitespace)
       |> choice([
         string("==") |> replace(:is),
@@ -63,59 +67,107 @@ defmodule Filters do
         string("!~") |> replace(:does_not_contain)
       ])
       |> ignore(optional_whitespace)
-      |> label("operator")
 
-    wildcard =
-      ascii_string([@wildcard_char], min: 1, max: 2)
-      |> optional(whitespace)
-      |> reduce({Enum, :join, [""]})
-      |> tag(:wildcard)
+    wildcard = ascii_string([?*], min: 1, max: 2)
 
-    word =
-      times(
-        utf8_string(@word, min: 1)
+    words =
+      optional_whitespace
+      |> optional(wildcard)
+      |> utf8_char(@word)
+      |> optional(
+        optional_whitespace
+        |> optional(string("\\|") |> replace("|"))
         |> optional(whitespace)
-        |> optional(string("\\|") |> replace("|") |> optional(whitespace))
-        |> reduce({Enum, :join, [""]}),
-        min: 1
+        |> utf8_char(@word)
       )
-
-    valid_token = choice([word, wildcard])
+      |> optional(wildcard)
 
     token =
       ignore(optional_whitespace)
-      |> times(valid_token, min: 1)
-      |> ignore(optional_whitespace)
-      |> reduce({:mark_wildcards, []})
-
-    alternative =
-      token
-      |> times(
-        concat(
-          ignore(ascii_char([@alt_separator_char])),
-          token
-        ),
+      |> times(words,
         min: 1
       )
-      |> wrap()
+      |> label("token")
 
-    exp =
+    literal_token =
+      token
+      |> reduce({:unwrap, [[tag_wildcards?: false]]})
+
+    wildcard_token =
+      token
+      |> reduce({:unwrap, [[tag_wildcards?: true]]})
+
+    defp unwrap(args, opts) do
+      if opts[:tag_wildcards?] and ("**" in args or "*" in args) do
+        {:wildcard, List.to_string(args)}
+      else
+        {:literal, List.to_string(args)}
+      end
+    end
+
+    literal_expression =
       ignore(optional_whitespace)
       |> times(
         choice([
-          alternative,
-          token
+          # list of tokens
+          literal_token
+          |> times(
+            ignore(
+              optional(whitespace)
+              |> ascii_char([@alt_separator_char])
+              |> optional(whitespace)
+            )
+            |> concat(literal_token),
+            min: 1
+          )
+          |> wrap(),
+          # just the token
+          literal_token
         ]),
         min: 1
       )
       |> ignore(optional_whitespace)
-      |> label("expression")
+
+    wildcard_expression =
+      ignore(optional_whitespace)
+      |> times(
+        choice([
+          # list of tokens
+          wildcard_token
+          |> times(
+            ignore(
+              optional(whitespace)
+              |> ascii_char([@alt_separator_char])
+              |> optional(whitespace)
+            )
+            |> concat(wildcard_token),
+            min: 1
+          )
+          |> wrap(),
+          # just the token
+          wildcard_token
+        ]),
+        min: 1
+      )
+      |> ignore(optional_whitespace)
+
+    literal_filter =
+      literal_key
+      |> concat(operator)
+      |> concat(literal_expression)
+
+    wildcard_filter =
+      wildcard_key
+      |> concat(operator)
+      |> concat(wildcard_expression)
 
     filter =
+      choice([literal_filter, wildcard_filter])
+      |> label("filter")
+
+    filters =
       times(
-        left
-        |> concat(mid)
-        |> concat(exp)
+        filter
         |> ignore(optional(ascii_char([@filter_separator_char])))
         |> wrap(),
         min: 1
@@ -175,22 +227,14 @@ defmodule Filters do
       {:wildcard, "**" <> String.replace(wildcard, "*", "") <> "**"}
     end
 
-    defp mark_wildcards(args) do
-      Enum.reduce(args, {:literal, ""}, fn
-        {:wildcard, [wildcard]}, {_type, acc} ->
-          {:wildcard, acc <> wildcard}
+    defparsec(:filters, filters, debug: false)
+    defparsec(:literal_expression, literal_expression, debug: false)
+    defparsec(:wildcard_expression, wildcard_expression, debug: false)
 
-        literal, {type, acc} ->
-          {type, acc <> literal}
-      end)
-    end
-
-    defparsec(:filter, filter, debug: false)
-
-    def parse_filters(input) do
-      case filter(input) do
-        {:ok, [filters], "", _, _, _} ->
-          {:ok, filters}
+    def parse(input, parse_with \\ :filters) do
+      case apply(__MODULE__, parse_with, [input]) do
+        {:ok, [parsed], "", _, _, _} ->
+          {:ok, parsed}
 
         {:ok, [parsed], _failed_to_parse, _, _, _} ->
           {:ok, parsed}

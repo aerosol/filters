@@ -2,7 +2,124 @@ defmodule FiltersTest do
   use ExUnit.Case
   doctest Filters
 
+  describe "parsing literal expressions" do
+    test "parses single char" do
+      assert {:ok, {:literal, "f"}} ==
+               parse("f", :literal_expression)
+    end
+
+    test "parses words" do
+      assert {:ok, {:literal, "hello Cruel world 😅"}} ==
+               parse("hello Cruel world 😅", :literal_expression)
+    end
+
+    test "strips whitespace" do
+      assert {:ok, {:literal, "hello Cruel world 😅"}} ==
+               parse("   hello Cruel world 😅  ", :literal_expression)
+    end
+
+    test "disregards escaped pipe" do
+      assert {:ok, {:literal, "hello|world"}} ==
+               parse("hello\\|world", :literal_expression)
+    end
+
+    test "disregards escaped pipe with spaces" do
+      assert {:ok, {:literal, "hello  |  world"}} ==
+               parse("hello  \\|  world", :literal_expression)
+    end
+
+    # test "parses escaped pipe alone" do
+    #   assert {:ok, {:literal, "|"}} ==
+    #            parse(" \\| ", :literal_expression)
+    # end
+
+    test "parses alternatives" do
+      assert {:ok, [{:literal, "A"}, {:literal, "B"}]} ==
+               parse("A|B", :literal_expression)
+    end
+
+    test "parses alternative words" do
+      assert {:ok, [{:literal, "Adam"}, {:literal, "Yolanda"}]} ==
+               parse("  Adam | Yolanda   ", :literal_expression)
+    end
+
+    test "parses alternative words - three" do
+      assert {:ok, [{:literal, "Adam"}, {:literal, "Yolanda"}, {:literal, "Juju"}]} ==
+               parse("  Adam | Yolanda | Juju  ", :literal_expression)
+
+      assert {:ok, [{:literal, "Adam"}, {:literal, "Yolanda"}, {:literal, "Juju"}]} ==
+               parse("Adam|Yolanda|Juju", :literal_expression)
+    end
+
+    test "parses alternatives and strips spaces" do
+      assert {:ok, [{:literal, "A"}, {:literal, "B"}]} ==
+               parse("  A|B    ", :literal_expression)
+    end
+
+    test "disregards wildcards" do
+      assert {:ok, {:literal, "Hello**"}} ==
+               parse("Hello**", :literal_expression)
+    end
+  end
+
+  describe "parsing wildcard expressions" do
+    test "parses single char into literal" do
+      assert {:ok, {:literal, "f"}} ==
+               parse("f", :wildcard_expression)
+    end
+
+    test "parses wildcard" do
+      assert {:ok, {:wildcard, "f**"}} ==
+               parse("f**", :wildcard_expression)
+    end
+
+    test "parses words wrapped with wildcards" do
+      assert {:ok, {:wildcard, "**Hello World**"}} ==
+               parse("**Hello World**", :wildcard_expression)
+    end
+
+    test "parses words into literal" do
+      assert {:ok, {:literal, "hello Cruel world 😅"}} ==
+               parse("hello Cruel world 😅", :wildcard_expression)
+    end
+
+    test "strips whitespace into literal" do
+      assert {:ok, {:literal, "hello Cruel world 😅"}} ==
+               parse("   hello Cruel world 😅  ", :wildcard_expression)
+    end
+
+    test "disregards escaped pipe into literal" do
+      assert {:ok, {:literal, "hello|world"}} ==
+               parse("hello\\|world", :wildcard_expression)
+    end
+
+    test "disregards escaped pipe with spaces into literal" do
+      assert {:ok, {:literal, "hello  |  world"}} ==
+               parse("hello  \\|  world", :wildcard_expression)
+    end
+
+    test "parses alternatives into literals" do
+      assert {:ok, [{:literal, "A"}, {:literal, "B"}]} ==
+               parse("A|B", :wildcard_expression)
+    end
+
+    test "parses alternative words into literals" do
+      assert {:ok, [{:literal, "Adam"}, {:literal, "Yolanda"}]} ==
+               parse("  Adam | Yolanda   ", :wildcard_expression)
+    end
+
+    test "parses alternatives and strips spaces" do
+      assert {:ok, [{:literal, "A"}, {:literal, "B"}]} ==
+               parse("  A|B    ", :wildcard_expression)
+    end
+  end
+
   describe "basic parsing" do
+    test "parses single literal property with :is" do
+      assert {:ok, [{"visit:city", :is, {:literal, "Foo Bar"}}]} ==
+               parse("city==Foo Bar")
+    end
+
     test "parses single property with :is" do
       assert {:ok, [{"visit:utm_campaign", :is, {:literal, "Foo Bar"}}]} ==
                parse("utm_campaign==Foo Bar")
@@ -197,9 +314,10 @@ defmodule FiltersTest do
       assert {:ok,
               [
                 {"visit:utm_campaign", :is, {:literal, "Foo Bar"}},
-                {"visit:utm_source", :is_not, {:literal, "Hello Cruel World"}}
+                {"visit:utm_source", :is_not, {:literal, "Hello Cruel World"}},
+                {"visit:city", :is, {:literal, "Warsaw"}}
               ]} ==
-               parse("utm_campaign==Foo Bar;utm_source!=Hello Cruel World")
+               parse("utm_campaign==Foo Bar;utm_source!=Hello Cruel World;city==Warsaw")
     end
 
     test "parses alternatives with :is" do
@@ -247,58 +365,44 @@ defmodule FiltersTest do
                parse("utm_campaign==Foo Bar**|Hello Cruel* World")
     end
 
-    test "three alternatives with trailing space" do
+    test "three alternatives" do
       assert {:ok,
               [
-                {"visit:utm_campaign", :is, [{:literal, "A"}, {:literal, "B"}, {:literal, "C"}]}
+                {"visit:utm_campaign", :is, [{:literal, "A"}, {:literal, "B"}, {:literal, "Coo"}]}
               ]} ==
-               parse("utm_campaign==A|B|C")
+               parse("utm_campaign==A|B|Coo")
     end
   end
 
   describe "parse errors" do
     test "key missing" do
-      assert {:error, "expected key name while processing key"} = parse("")
-      assert {:error, "expected key name while processing key"} = parse("xx")
-      assert {:error, "expected key name while processing key"} = parse(" xx")
-      assert {:error, "expected key name while processing key"} = parse(" xx ")
-      assert {:error, "expected key name while processing key"} = parse("xx ")
+      assert {:error, "expected filter"} = parse("")
+      assert {:error, "expected filter"} = parse("xx")
+      assert {:error, "expected filter"} = parse(" xx")
+      assert {:error, "expected filter"} = parse(" xx ")
+      assert {:error, "expected filter"} = parse("xx ")
     end
 
     test "operator missing" do
-      assert {:error, "expected operator"} = parse("country")
-      assert {:error, "expected operator"} = parse("country  ")
-      assert {:error, "expected operator"} = parse(" country  ")
-      assert {:error, "expected operator"} = parse("    country")
-      assert {:error, "expected operator"} = parse("country=")
-      assert {:error, "expected operator"} = parse("country!")
+      assert {:error, "expected filter"} = parse("country")
+      assert {:error, "expected filter"} = parse("country  ")
+      assert {:error, "expected filter"} = parse(" country  ")
+      assert {:error, "expected filter"} = parse("    country")
+      assert {:error, "expected filter"} = parse("country=")
+      assert {:error, "expected filter"} = parse("country!")
     end
 
     test "expression missing" do
-      assert {:error, "expected expression"} = parse("country==")
-      assert {:error, "expected expression"} = parse(" country==")
-      assert {:error, "expected expression"} = parse("country== ")
-      assert {:error, "expected expression"} = parse("country == ")
-      assert {:error, "expected expression"} = parse(" country == ")
+      assert {:error, "expected filter"} = parse("country==")
+      assert {:error, "expected filter"} = parse(" country==")
+      assert {:error, "expected filter"} = parse("country== ")
+      assert {:error, "expected filter"} = parse("country == ")
+      assert {:error, "expected filter"} = parse(" country == ")
     end
   end
 
-  test "greets the world" do
-    # parse("foo==bar")
-    # parse("foo!=bar")
-    # parse("foo!~=bar")
-    # parse("foo~bar")
-    # parse("foo==bar**")
-    # parse("foo==*bar*")
-    # parse("foo==bar;baz==bam")
-    # parse("   foobar  ==      baz bam baz   ")
-    # parse("foo==bar|bam beng foo  |bang mooo   ")
-    # parse("foo==bar|bam beng foo  |bang mooo** ;xxxx==yyyy  ")
-    # parse("xxxx")
-  end
-
-  defp parse(input) do
-    {time, result} = :timer.tc(fn -> Filters.Parser.parse_filters(input) end)
+  defp parse(input, parse_with \\ :filters) do
+    {time, result} = :timer.tc(fn -> Filters.Parser.parse(input, parse_with) end)
 
     if Filters.Parser.debug?() do
       IO.puts(inspect(time / 1_000) <> "ms \t" <> IO.ANSI.bright() <> input <> "\t")
