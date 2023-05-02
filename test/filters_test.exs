@@ -28,11 +28,6 @@ defmodule FiltersTest do
                parse("hello  \\|  world", :literal_expression)
     end
 
-    # test "parses escaped pipe alone" do
-    #   assert {:ok, {:literal, "|"}} ==
-    #            parse(" \\| ", :literal_expression)
-    # end
-
     test "parses alternatives" do
       assert {:ok, [{:literal, "A"}, {:literal, "B"}]} ==
                parse("A|B", :literal_expression)
@@ -194,8 +189,13 @@ defmodule FiltersTest do
       assert {:ok, [{"visit:country", :is, {:literal, "EE"}}]} == parse("country==EE")
     end
 
+    test "country must be 2 characters long" do
+      assert {:ok, [{"visit:country", :is, [{:literal, "EE"}, {:literal, "XX"}]}]} ==
+               parse("country==EE|XX|XYZ")
+    end
+
     test "source is turned into visit:source" do
-      assert {:ok, [{"visit:source", :is, {:literal, "EE"}}]} == parse("source==EE")
+      assert {:ok, [{"visit:source", :is, {:literal, "foo.com"}}]} == parse("source==foo.com")
     end
 
     test "referrer is turned into visit:referer" do
@@ -306,6 +306,10 @@ defmodule FiltersTest do
               [
                 {"visit:utm_campaign", :is, {:literal, "foo   |   bar"}}
               ]} = parse("utm_campaign==foo   \\|   bar")
+    end
+
+    test "country validation and following filter" do
+      assert {:error, "did not expect filter"} = parse("country==XXX;utm_source=foo.com")
     end
   end
 

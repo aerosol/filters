@@ -41,7 +41,6 @@ defmodule Filters do
       |> choice([
         string("name") |> replace("event:name"),
         string("source") |> replace("visit:source"),
-        string("country") |> replace("visit:country"),
         string("referrer") |> replace("visit:referrer"),
         string("screen") |> replace("visit:screen"),
         string("browser_version") |> replace("visit:browser_version"),
@@ -56,6 +55,12 @@ defmodule Filters do
         |> ascii_string([?a..?z, ?A..?Z, ?0..9, ?_], min: 1)
         |> reduce({Enum, :join, [""]})
       ])
+      |> ignore(optional_whitespace)
+
+    country_key =
+      ignore(optional_whitespace)
+      |> string("country")
+      |> replace("visit:country")
       |> ignore(optional_whitespace)
 
     operator =
@@ -96,6 +101,9 @@ defmodule Filters do
     wildcard_token =
       token
       |> reduce({:unwrap, [[tag_wildcards?: true]]})
+
+    country_token =
+      ascii_string([?A..?Z], 2) |> lookahead_not(utf8_char(@word)) |> unwrap_and_tag(:literal)
 
     defp unwrap(args, opts) do
       if opts[:tag_wildcards?] and ("**" in args or "*" in args) do
@@ -151,6 +159,29 @@ defmodule Filters do
       )
       |> ignore(optional_whitespace)
 
+    country_expression =
+      ignore(optional_whitespace)
+      |> times(
+        choice([
+          # list of tokens
+          country_token
+          |> times(
+            ignore(
+              optional(whitespace)
+              |> ascii_char([@alt_separator_char])
+              |> optional(whitespace)
+            )
+            |> concat(country_token),
+            min: 1
+          )
+          |> wrap(),
+          # just the token
+          country_token
+        ]),
+        min: 1
+      )
+      |> ignore(optional_whitespace)
+
     literal_filter =
       literal_key
       |> concat(operator)
@@ -161,8 +192,13 @@ defmodule Filters do
       |> concat(operator)
       |> concat(wildcard_expression)
 
+    country_filter =
+      country_key
+      |> concat(operator)
+      |> concat(country_expression)
+
     filter =
-      choice([literal_filter, wildcard_filter])
+      choice([literal_filter, wildcard_filter, country_filter])
       |> label("filter")
 
     filters =
